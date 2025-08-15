@@ -1,0 +1,152 @@
+/**
+ * 分类匹配答题
+ * 核心逻辑：
+ * 1. 智能分类答案和页面题目。
+ * 2. 填空、单选、多选题根据答案列表匹配填充。
+ * 3. 判断题根据规则【全部选择第一项】进行填充。
+ */
+function runUltimateSolver() {
+  console.log("--- 启动脚本 ---");
+
+  try {
+    // 步骤 1: 获取、清理并分类答案数据
+    if (typeof app === 'undefined' || !app.answerInfo || !app.answerInfo.questions) {
+      const errorMsg = "错误：未找到答案数据 (app.answerInfo.questions)。请确保在正确的页面上运行。";
+      console.error(errorMsg);
+      alert(errorMsg);
+      return;
+    }
+
+    const singleChoiceAnswers = [];
+    const multiChoiceAnswers = [];
+    const fillInAnswers = [];
+
+    app.answerInfo.questions.forEach(q => {
+      const cleanedAnswer = q.rightAnswer.replace(/[()（）]/g, '').trim();
+      const capitalLetters = cleanedAnswer.match(/[A-Z]/g) || [];
+
+      if (capitalLetters.length === 1 && cleanedAnswer.length === 1) {
+        singleChoiceAnswers.push(cleanedAnswer);
+      } else if (capitalLetters.length > 1) {
+        multiChoiceAnswers.push(cleanedAnswer);
+      } else {
+        fillInAnswers.push(cleanedAnswer);
+      }
+    });
+
+    console.log("--- 答案分类结果 ---");
+    console.log(`单选题答案 (${singleChoiceAnswers.length}个):`, singleChoiceAnswers);
+    console.log(`多选题答案 (${multiChoiceAnswers.length}个):`, multiChoiceAnswers);
+    console.log(`填空题答案 (${fillInAnswers.length}个):`, fillInAnswers);
+
+    // 步骤 2: 扫描并分类页面上的所有题目元素
+    const singleChoiceElements = [];
+    const multiChoiceElements = [];
+    const fillInElements = [];
+    const judgmentElements = [];
+
+    document.querySelectorAll('div.question').forEach(questionEl => {
+      const parentBox = questionEl.closest('.questionbox.margintop10');
+      const titleText = parentBox ? parentBox.querySelector('p.title')?.innerText || '' : '';
+
+      if (titleText.includes('单选')) {
+        singleChoiceElements.push(questionEl);
+      } else if (titleText.includes('多选')) {
+        multiChoiceElements.push(questionEl);
+      } else if (titleText.includes('填空')) {
+        fillInElements.push(questionEl);
+      } else if (titleText.includes('判断')) {
+        judgmentElements.push(questionEl);
+      }
+    });
+
+    console.log("--- 页面题目分类结果 ---");
+    console.log(`找到单选题 (${singleChoiceElements.length}个)`);
+    console.log(`找到多选题 (${multiChoiceElements.length}个)`);
+    console.log(`找到填空题 (${fillInElements.length}个)`);
+    console.log(`找到判断题 (${judgmentElements.length}个)`);
+
+    // 步骤 3: 按类型进行匹配和填充
+    function fillQuestionSet(elements, answers, type) {
+        console.log(`\n--- 开始填充 ${type} ---`);
+        if (elements.length !== answers.length && type !== '判断题') {
+            console.warn(`警告：${type}的题目数量(${elements.length})与答案数量(${answers.length})不匹配！`);
+        }
+        
+        const limit = Math.min(elements.length, answers.length);
+        for (let i = 0; i < limit; i++) {
+            const el = elements[i];
+            const ans = answers[i];
+            const questionNumber = el.querySelector('p')?.innerText.split('.')[0] || `(内部序号 ${i+1})`;
+
+            if (type === '单选题') {
+                 el.querySelectorAll('div.option > span').forEach(opt => {
+                    if (opt.querySelector('span')?.innerText.trim().startsWith(ans)) {
+                        const icon = opt.querySelector('i.icon');
+                        if (icon && !icon.classList.contains('icon-radioon')) {
+                            opt.click();
+                            console.log(`单选题 ${questionNumber}: 已选择 -> ${ans}`);
+                        }
+                    }
+                });
+            } else if (type === '多选题') {
+                const correctLetters = ans.replace(/[\s,，]/g, '').split('');
+                el.querySelectorAll('div.option > span').forEach(opt => {
+                    const letter = opt.querySelector('span')?.innerText.trim().charAt(0);
+                    if (correctLetters.includes(letter)) {
+                        const icon = opt.querySelector('i.icon');
+                        if (icon && !icon.classList.contains('icon-checkboxlist')) {
+                           opt.click();
+                        }
+                    }
+                });
+                 console.log(`多选题 ${questionNumber}: 已尝试选择 -> ${correctLetters.join(',')}`);
+            } else if (type === '填空题') {
+                const inputs = el.querySelectorAll('input[type="text"]');
+                if (inputs.length > 0) {
+                    // 使用包含'、'在内的多种分隔符拆分答案
+                    const answerParts = ans.split(/[\s,，、|]+/);
+                    
+                    // 遍历所有输入框，并用对应的答案片段填充
+                    for (let j = 0; j < inputs.length; j++) {
+                        if (answerParts[j]) { // 如果存在对应的答案片段
+                            inputs[j].value = answerParts[j];
+                            inputs[j].dispatchEvent(new Event('input', { bubbles: true }));
+                        }
+                    }
+                    console.log(`填空题 ${questionNumber}: 已尝试分段填入 -> "${ans}"`);
+                }
+            }
+        }
+    }
+
+    fillQuestionSet(singleChoiceElements, singleChoiceAnswers, '单选题');
+    fillQuestionSet(multiChoiceElements, multiChoiceAnswers, '多选题');
+    fillQuestionSet(fillInElements, fillInAnswers, '填空题');
+
+    // 步骤 4: 处理所有判断题
+    console.log(`\n--- 开始填充 判断题 (规则: 全部选择第一项) ---`);
+    judgmentElements.forEach((el, i) => {
+        const questionNumber = el.querySelector('p')?.innerText.split('.')[0] || `(内部序号 ${i+1})`;
+        const firstOption = el.querySelector('div.option > span:first-of-type');
+        
+        if (firstOption) {
+            const icon = firstOption.querySelector('i.icon');
+            if (icon && !icon.classList.contains('icon-radioon')) {
+                firstOption.click();
+                console.log(`判断题 ${questionNumber}: 已选择第一项。`);
+            }
+        }
+    });
+
+    console.log("\n--- 脚本执行完毕 ---");
+    alert("所有题目（包括多空填空题）已按规则填充完毕！请仔细检查页面。");
+
+  } catch (error) {
+    console.error("脚本执行过程中发生严重错误:", error);
+    alert("脚本执行出错，请按F12打开控制台查看详细错误信息。");
+  }
+}
+
+// 运行主函数
+runUltimateSolver();
